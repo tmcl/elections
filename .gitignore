@@ -18,3 +18,5 @@ cabal.sandbox.config
 .stack-work/
 cabal.project.local
 .HTF/
+frontend/node_modules
+frontend/elm-stuff
