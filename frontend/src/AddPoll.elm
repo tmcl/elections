@@ -1,11 +1,20 @@
-module Demo exposing (main)
+module AddPoll exposing (main)
 
-import Html exposing (Html, text, p, label, form, ul, li, div, select, option, button, table, tr, td, tbody, th, input)
+{-| This library fills a bunch of important niches in Elm. A `Maybe` can help
+you with optional arguments, error handling, and records with optional fields.
+
+# Definition
+@docs main
+
+-}
+
+import Http
+import Html exposing (Html, text, p, label, form, ul, li, div, select, option, button, table, tr, td, tbody, thead, th, input)
 import Html.Attributes exposing (selected, value, disabled, type_)
 import Html.Events exposing (onInput, onClick)
 import DateTimePicker
 import DateTimePicker.Config exposing (Config, DatePickerConfig, TimePickerConfig, defaultDatePickerConfig, defaultDateTimePickerConfig, defaultDateTimeI18n, defaultTimePickerConfig)
-import Date exposing (Date)
+import Date exposing (Date, year, month, day)
 import Css
 import DateTimePicker.Css
 import DatepickerCss exposing (CssClasses(..))
@@ -13,6 +22,8 @@ import Html.CssHelpers
 import Date.Extra.Format
 import Date.Extra.Config.Config_en_au exposing (config)
 import DateParser
+import Json.Encode
+import Json.Decode exposing (Decoder)
 
 
 form2 : Model -> List (Html Msg)
@@ -26,8 +37,55 @@ form2 model =
        , field "Govt 2PP" (input [onInput Set2PP, value model.govt2pp] [])
        , field "New Party" (renderNewParty model.parties model.partialParty model.partialPartyAmount model.partialPartyAmountParsed SetPartialParty OnCompleteParty) ] ++ List.map renderParty model.parties ++ 
        [ field "(Leftovers)" (text (toString leftovers))
-       , field "" (renderAddButton model leftovers)]
+       , field "" (renderAddButton model leftovers)
+       , field "Other polls" (otherPolls model.polls)]
 
+otherPolls : List Poll -> Html Msg
+otherPolls polls = 
+   table []
+        [ thead [] 
+                [ tr []
+                        [ th [] [text "Date"] 
+                        , th [] [text "Publisher"] 
+                        , th [] [text "Govt 2PP"] 
+                        , th [] [text "LNC"] 
+                        , th [] [text "ALP"]
+                        , th [] [text "GRN"]
+                        , th [] [text "ONP"]
+                        , th [] [text "OTH"] 
+                        ]
+                ]
+        , tbody [] (List.concat (List.map otherPoll polls))
+        ]
+
+formatDates : Date -> Date -> String
+formatDates start end = if start == end then formatDate start else formatDate start ++ " - " ++ formatDate end
+
+formatDate : Date -> String
+formatDate date = toString (day date) ++ " " ++ toString (month date) ++ " " ++ toString (year date)
+   
+otherPoll : Poll -> List (Html msg)
+otherPoll poll = [ tr []
+                        [ td [] [text (formatDates poll.startDate poll.endDate)] 
+                        , td [] [text (toString poll.publisher)] 
+                        , td [] [text (toString poll.govt2pp)] 
+                        , td [] [text (toString (getGroup poll LNC))] 
+                        , td [] [text (toString (getGroup poll ALP))]
+                        , td [] [text (toString (getGroup poll GRN))]
+                        , td [] [text (toString (getGroup poll ONP))]
+                        , td [] [text (toString (getGroup poll OTH))] 
+                        ]
+                ]
+
+getParty : List (Party, Float) -> Party -> Float
+getParty results party = List.sum (List.map Tuple.second (List.filter (\e -> Tuple.first e == party) results))
+
+getGroup : Poll -> Party -> Float
+getGroup poll party = case party of
+   LNC -> (getParty poll.parties LNC) + (getParty poll.parties LIB) + (getParty poll.parties NAT)
+   _ -> getParty poll.parties party
+
+renderAddButton : Model -> comparable -> Html Msg
 renderAddButton model leftovers = 
    let
        clickHandler = Maybe.withDefault 
@@ -46,14 +104,24 @@ renderDate state date setter = DateTimePicker.datePickerWithConfig
                             state
                             date
 
+renderPublisherSelect : Maybe Firm -> (Maybe Firm -> Msg) -> Html Msg
 renderPublisherSelect = flip selectPublisherBox 
 
+renderParty : ( Party, a ) -> Html Msg
 renderParty (party, amount) = field (partyToName party) (div [] 
    [ (text (toString amount))
    , (text " ")
    , (button [type_ "button", onClick (RemoveParty party)] [text "❌"])
    ])
 
+renderNewParty
+    : List ( Party, a2 )
+    -> Maybe Party
+    -> String
+    -> Maybe b
+    -> (Maybe Party -> String -> Msg)
+    -> (Party -> b -> Msg)
+    -> Html Msg
 renderNewParty parties pp ppa ppap setter onCompleteParty = 
    let
        otherParties : List (Maybe Party, String)
@@ -79,9 +147,8 @@ bubble (a, b) = case a of
         Nothing -> Nothing
         Just a_ -> Just (a_, b)
 
-maybeToBoolean m = case m of 
-   Just _ -> True
-   Nothing -> False
+maybeToBoolean : Maybe a -> Bool
+maybeToBoolean m = Maybe.withDefault False (Maybe.map (\_ -> True) m)
 
 field : String -> Html msg -> Html msg
 field labelText content = tr [] 
@@ -90,6 +157,8 @@ field labelText content = tr []
         ]
 
 
+
+{-| aoeu |-}
 main : Program Never Model Msg
 main =
     Html.program
@@ -109,6 +178,7 @@ publisherFromString a = case a of
         "Just Ipsos" -> Just Ipsos
         _ -> Nothing
 
+publisherEntries : List ( Maybe Firm, String )
 publisherEntries = [ Nothing => "...",
         Just Essential => "Essential",
         Just Newspoll => "Newspoll",
@@ -129,6 +199,7 @@ partyFromString a = case a of
         "Just OTH" -> Just OTH
         _ -> Nothing
 
+partyToName : Party -> String
 partyToName party = case party of
         LNC -> "Coalition"
         ALP -> "Labor"
@@ -138,6 +209,7 @@ partyToName party = case party of
         ONP -> "One Nation"
         OTH -> "Other"
 
+partyEntries : List ( Maybe Party, String )
 partyEntries = [
         Nothing => "...",
         Just LNC => "Coalition",
@@ -157,6 +229,8 @@ type alias Poll =
    , parties: List (Party, Float)
    , isNew: Bool
    }
+
+oldPoll poll = {poll | isNew = False}
 
 type alias Model =
     { startDate : Maybe Date
@@ -242,8 +316,10 @@ view model =
                   [ p [] [text (toString model)]])
             ]
 
+(=>) : a -> b -> ( a, b )
 (=>) = (,)
 
+makeOption : a -> ( a, String ) -> Html msg
 makeOption current e = 
         let code = Tuple.first e 
         in option [value (toString code), selected (code == current)] [text (Tuple.second e)]
@@ -252,7 +328,14 @@ selectBox : (String -> a) -> List (a, String) -> (a -> Msg) -> a -> Html Msg
 selectBox deserialiser options setter current =
    select [onInput (setter << deserialiser)] (List.map (makeOption current) options)
 
+selectPublisherBox : (Maybe Firm -> Msg) -> Maybe Firm -> Html Msg
 selectPublisherBox = selectBox publisherFromString publisherEntries 
+
+selectPartyBox
+    : List ( Maybe Party, String )
+    -> (Maybe Party -> Msg)
+    -> Maybe Party
+    -> Html Msg
 selectPartyBox entries = selectBox partyFromString entries
 
 type Msg
@@ -265,7 +348,9 @@ type Msg
     | Set2PP String
     | AddPoll Date Date Firm Float
     | RemoveParty Party
+    | ReceiveUpdates (Result Http.Error Success)
 
+resultToMaybe : Result error a -> Maybe a
 resultToMaybe result = case result of
    Ok r -> Just r
    Err _ -> Nothing
@@ -298,13 +383,73 @@ update msg model =
            ( { model | parties = List.filter (Tuple.first >> (/=) party) model.parties }, Cmd.none)
 
         AddPoll startDate endDate publisher govt2pp  ->
-           ( { initialState | polls = model.polls ++ [
-              { startDate = startDate
+           let newPoll = { startDate = startDate
               , endDate = endDate
               , publisher = publisher
               , govt2pp = govt2pp
               , parties = model.parties
               , isNew = True
-           }]
-          } , Cmd.none)
+           }
+           in
+           ({initialState | polls = model.polls ++ [newPoll]}, submitPoll newPoll)
 
+        ReceiveUpdates (Ok _) -> (model, Cmd.none) {- todo -}
+        ReceiveUpdates (Err _) -> (model, Cmd.none) {- todo -}
+
+{-
+pollDecoder : Decoder Poll
+pollDecoder = Json.Decode.map4 oldPoll
+        (Json.Decode.at ["startDate", "endDate"] Json.Decode.date)
+        (Json.Decode.at ["publisher"] firmDecoder)
+        (Json.Decode.at ["govt2pp"] Json.Decode.float)
+        (Json.Decode.at ["parties"] (list partyDecoder))
+
+firmDecoder : Decoder Firm
+firmDecoder = string |> Json.Decode.andThen helpFirm
+
+helpFirm : String -> Decoder Firm
+helpFirm firm = 
+   case firm of
+      "Essential" -> Json.Decode.succeed Essential
+      "Newspoll" -> Json.Decode.succeed Newspoll
+      "Ipsos" -> Json.Decode.success Ipsos
+      e -> Json.Decode.fail ("Unknown firm in json" ++ e)
+
+partyDecoder : Decoder Party
+partyDecoder = 
+   -}
+   
+successDecoder : Decoder Success
+successDecoder = Json.Decode.string |> Json.Decode.andThen helpSuccess
+
+type Success = Good | Bad
+
+helpSuccess : String -> Decoder Success
+helpSuccess success = 
+   case success of
+      "Good" -> Json.Decode.succeed Good
+      "Bad" -> Json.Decode.succeed Bad
+      e -> Json.Decode.fail ("Unknown completion in json" ++ e)
+
+pollToJson poll = 
+   Json.Encode.object [ "startDate" => encodeDate poll.startDate
+                      , "endDate" => encodeDate poll.endDate
+                      , "publisher" => Json.Encode.string (toString poll.publisher)
+                      , "govt2pp" => Json.Encode.float (poll.govt2pp)
+                      , "parties" => Json.Encode.list (List.map encodeParty poll.parties) 
+                      ]
+
+encodeDate date = Json.Encode.string ((toString (year date)) ++ "-" ++ 
+                                      (toString (month date)) ++ "-" ++
+                                      (toString (day date)) ++ "-")
+
+encodeParty = Json.Encode.string << toString
+
+submitPoll : Poll -> Cmd Msg
+submitPoll poll = 
+   let
+       url = "https://localhost:8181/submit-poll"
+       body = Http.jsonBody (pollToJson poll)
+       request = Http.post url body successDecoder
+   in
+      Http.send ReceiveUpdates request
